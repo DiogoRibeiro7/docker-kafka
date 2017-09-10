@@ -10,18 +10,6 @@ ENV AUTO_CREATE_TOPICS true
 ENV KAFKA_MANAGER_CONFIG_DIR /etc/docker-kafka/config
 ENV KAFKA_MANAGER_HOME /opt/kafka_manager
 
-# Add Kafka Manager directory
-RUN mkdir -p $KAFKA_MANAGER_HOME
-
-# Copy script
-COPY python/KafkaManager.py $KAFKA_MANAGER_HOME
-
-# Create configuration directory
-RUN mkdir -p $KAFKA_MANAGER_CONFIG_DIR
-
-# Copy config
-COPY config $KAFKA_MANAGER_CONFIG_DIR
-
 # Install Kafka, Zookeeper and other needed things
 RUN apt-get update && \
     apt-get install -y zookeeper wget supervisor dnsutils && \
@@ -41,4 +29,22 @@ ADD supervisor/kafka.conf \
 # 2181 is zookeeper, 9092 is kafka
 EXPOSE 2181 9092
 
+# Add Kafka Manager directory
+RUN mkdir -p $KAFKA_MANAGER_HOME
+
+# Copy script
+COPY python/KafkaManager.py $KAFKA_MANAGER_HOME
+
+# Create configuration directory
+RUN mkdir -p $KAFKA_MANAGER_CONFIG_DIR
+
+# Copy config
+COPY config $KAFKA_MANAGER_CONFIG_DIR
+
+# Get pip, install single python dependency
+RUN apt-get update && \
+    apt-get install -y python-pip python-dev && \
+    pip install pykafka
+
+# Supervisord will run our services
 CMD ["supervisord", "-n"]
