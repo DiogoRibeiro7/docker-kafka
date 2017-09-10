@@ -19,6 +19,10 @@ RUN apt-get update && \
     tar xfz /tmp/kafka_"$SCALA_VERSION"-"$KAFKA_VERSION".tgz -C /opt && \
     rm /tmp/kafka_"$SCALA_VERSION"-"$KAFKA_VERSION".tgz
 
+# Get pip, install python dependency
+RUN apt-get update && \
+    apt-get install -y python-pip python-dev
+
 ADD scripts/simple-start-kafka.sh /usr/bin/start-kafka.sh
 
 # Supervisor config
@@ -41,10 +45,8 @@ RUN mkdir -p $KAFKA_MANAGER_CONFIG_DIR
 # Copy config
 COPY config $KAFKA_MANAGER_CONFIG_DIR
 
-# Get pip, install single python dependency
-RUN apt-get update && \
-    apt-get install -y python-pip python-dev && \
-    pip install pykafka
+# Run pip install
+RUN pip install -r $KAFKA_MANAGER_CONFIG_DIR/requirements.txt
 
-# Supervisord will run our services
-CMD ["supervisord", "-n"]
+# Supervisord will run our services, -c prevents running as root
+CMD ["supervisord", "-n", "-c /etc/supervisor/supervisord.conf"]

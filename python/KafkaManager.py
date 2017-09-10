@@ -1,7 +1,7 @@
 import subprocess
-from shlex import quote
+from pipes import quote
 from configparser import ConfigParser
-from os import environ
+from os import environ, path
 from pykafka import KafkaClient
 from json import dumps, loads
 from time import sleep
@@ -21,12 +21,14 @@ class KafkaManager(object):
     def __init__(self):
         # Parse environment variables as DEFAULT configurations
         self.config = ConfigParser(environ)
-        self.config.read(environ.get('KAFKA_MANAGER_CONFIG_DIR'))
-        self.kafka_home = self.config.get('KAFKA_HOME')
+        conf = path.join(environ.get('KAFKA_MANAGER_CONFIG_DIR'), 'config.cfg')
+        self.config.read(conf)
+        self.kafka_home = environ.get('KAFKA_HOME')
         self.scripts = dict(self.config.items('kafka-cli'))
         self.zkpr = self.config.get('zookeeper', 'gateway')
         self.consumer_grp = self.config.get('kafka', 'default_consumer_group')
-        self.kafka_host = config.get('kafka', 'gateway')
+        self.kafka_host = self.config.get('kafka', 'gateway')
+        print("Connecting to kafka ({})".format(self.kafka_host))
         self.client = KafkaClient(hosts=self.kafka_host)
         # Create dictionary of possible request functions - layer of protection
         # against running unverified commands on the host 
@@ -54,6 +56,7 @@ class KafkaManager(object):
                                         auto_commit_enable=True,
                                         zookeeper_connect=self.zkpr)
         # Continuously poll
+        print("Polling ...")
         with out_topic.get_producer() as producer:
             for message in balanced_consumer:
                 count = 0
@@ -72,6 +75,7 @@ class KafkaManager(object):
                                           'kwargs': dumps(kwargs),
                                           'output': output,
                                           'id': _id})
+                        count += 1
                         producer.produce(response, partition_key=str(count))
                     else:
                         print("Request function {} not found".format(function))
