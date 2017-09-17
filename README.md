@@ -15,11 +15,11 @@ in the same container. This means:
 Run
 ---
 
-```$ docker build --rm -t docker-kafka .
-```
+`$ docker build --rm -t docker-kafka .
+`
 
-```$ docker run -it docker-kafka
-```
+`$ docker run -it docker-kafka
+`
 
 Logs are stored in /tmp/kafka and /etc/kafka_manager.
 
