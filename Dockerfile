@@ -23,11 +23,18 @@ RUN apt-get update && \
 RUN apt-get update && \
     apt-get install -y python-pip python-dev
 
-ADD scripts/simple-start-kafka.sh /usr/bin/start-kafka.sh
+# Create configuration directory
+RUN mkdir -p $KAFKA_MANAGER_CONFIG_DIR
+
+# Copy config
+COPY config $KAFKA_MANAGER_CONFIG_DIR
+
+# Run pip install
+RUN pip install -r $KAFKA_MANAGER_CONFIG_DIR/requirements.txt
 
 # Supervisor config
 ADD supervisor/kafka.conf \
-    supervisor/zookeeper.conf \
+    supervisor/zookeeper.conf\
     supervisor/kafka_manager.conf /etc/supervisor/conf.d/
 
 # 2181 is zookeeper, 9092 is kafka
@@ -39,14 +46,9 @@ RUN mkdir -p $KAFKA_MANAGER_HOME
 # Copy script
 COPY python/KafkaManager.py $KAFKA_MANAGER_HOME
 
-# Create configuration directory
-RUN mkdir -p $KAFKA_MANAGER_CONFIG_DIR
+ADD scripts/simple-start-kafka.sh /usr/bin/start-kafka.sh
 
-# Copy config
-COPY config $KAFKA_MANAGER_CONFIG_DIR
+RUN chmod +x /usr/bin/start-kafka.sh
 
-# Run pip install
-RUN pip install -r $KAFKA_MANAGER_CONFIG_DIR/requirements.txt
-
-# Supervisord will run our services, -c prevents running as root
-CMD ["supervisord", "-n", "-c /etc/supervisor/supervisord.conf"]
+# Supervisord will run our services
+CMD ["supervisord", "-n"]
