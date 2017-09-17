@@ -4,6 +4,7 @@ from shlex import split as shlexsplit
 from configparser import ConfigParser
 from os import environ, path, makedirs
 from pykafka import KafkaClient
+from pykafka.utils.compat import get_bytes
 from json import dumps, loads
 from time import sleep
 from shutil import copyfile
@@ -32,8 +33,8 @@ class KafkaManager(object):
         self.zkpr = self.config.get('zookeeper', 'gateway')
         self.consumer_grp = bytes(self.config.get('kafka', 'default_consumer_group'))
         self.kafka_host = self.config.get('kafka', 'gateway')
-        self.num_brokers = 1
-        print("Connecting to kafka ({})".format(self.kafka_host))
+        self.num_brokers = 1 # we start with 1 broker by default
+        self.log.info("Connecting to kafka ({})".format(self.kafka_host))
         self.client = KafkaClient(hosts=self.kafka_host)
         # Create dictionary of possible request functions - layer of protection
         # against running unverified commands on the host 
@@ -60,40 +61,44 @@ class KafkaManager(object):
                                         auto_commit_enable=True,
                                         zookeeper_connect=self.zkpr)
         # Continuously poll
-        print("Polling ...")
+        self.log.info("Polling ...")
         with out_topic.get_producer() as producer:
-            for message in balanced_consumer:
-                count = 0
-                if message is not None:
-                    print("Found msg <{}> @ offset {}".format(message.value,
-                                                              message.offset))
-                    function = message.value['function']
-                    kwargs = message.value['kwargs']
-                    _id = message.value['id']
-                    kwargs = loads(kwargs)
-                    if function in self.func_dict:
-                        # Execute script with supplied key word args
-                        output = self.func_dict[function](**kwargs)
-                        # Post response
-                        response = dumps({'function': function,
-                                          'kwargs': dumps(kwargs),
-                                          'output': output,
-                                          'id': _id})
-                        count += 1
-                        producer.produce(response, partition_key=str(count))
+            while True:
+                for message in balanced_consumer:
+                    count = 0
+                    if message is not None:
+                        self.log.info("Found msg <{}> @ offset {}".format
+                                                (message.value,message.offset))
+                        contents = loads(message.value)
+                        function = contents['function']
+                        kwargs = contents['kwargs']
+                        _id = contents['id']
+                        self.log.info('Checking ..')
+                        if function in self.func_dict:
+                            # Execute script with supplied key word args
+                            output = self.func_dict[function](**kwargs)
+                            # Post response
+                            response = dumps({'function': function,
+                                              'kwargs': dumps(kwargs),
+                                              'output': output,
+                                              'id': _id})
+                            count += 1
+                            self.log.info('Submitting response: {}'.format(response))
+                            producer.produce(response, partition_key=str(count))
+                        else:
+                            self.log.info("Function {} not found".format(function))
                     else:
-                        print("Request function {} not found".format(function))
-                else:
-                    print("Found None msg")
+                        self.log.info("Found None msg")
 
     def start_logger(self, logs):
+        """Logging boilerplate"""
         # Create logging directory if it does not exist:
         if not path.exists(path.dirname(logs)):
             makedirs(path.dirname(logs))
         # Logging boilerplate
         logger = logging.getLogger('KafkaManager')
         logger.setLevel(logging.DEBUG)
-        fh = logging.FileHandler(logs, mode='w+')
+        fh = logging.FileHandler(logs, mode='a+')
         fh.setLevel(logging.DEBUG)
         ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
@@ -110,7 +115,7 @@ class KafkaManager(object):
         if name in self.scripts:
             return path.join(self.kafka_home, self.scripts[name])
         else:
-            print("{} script not found".format(name))
+            self.log.info("{} script not found".format(name))
             return None
 
     def _run_sh(self, script, args):
@@ -120,7 +125,7 @@ class KafkaManager(object):
         script = self._get_sh(script)
         cmd = [script, '--zookeeper', self.zkpr] + args # might need to change
         cmd = ' '.join([str(c) for c in cmd]) # cmd needs to be str
-        print("running: {}".format(cmd))
+        self.log.info("running: {}".format(cmd))
         return subprocess.check_output(shlexsplit(quote(cmd).replace("'", '')))
 
     def list_topics(self):
@@ -139,29 +144,29 @@ class KafkaManager(object):
                    replication=1):
         """Use kafka-topics.sh to create a topic."""
         if self.is_topic(topic):
-            print("{} topic already exists".format(topic))
-            return True
+            self.log.info("{} topic already exists".format(topic))
+            return 'already_exists'
         else:
-            print("Creating topic {}".format(topic))
+            self.log.info("Creating topic {}".format(topic))
             args = ['--create',
-                   '--topic', topic,
+                   '--topic', get_bytes(topic),
                    '--partitions', partitions,
                    '--replication-factor', replication]
             self._run_sh('topics_sh', args)
             sleep(0.5)
-            return self.is_topic(topic)
+            if self.is_topic(topic):
+                self.log.info('Topic {} created'.format(topic))
+                return 'created'
 
     def delete_topic(self, topic):
         """Delete single topic by name"""
-        print("Deleting topic {}".format(topic))
-        args = ['--delete', '--topic', topic_name]
+        self.log.info("Deleting topic {}".format(topic))
+        args = ['--delete', '--topic', topic]
         self._run_sh('topics_sh', args)
-        return self.is_topic(topic)
+        return 'deleted'
 
     def add_broker(self):
         """Adds a new broker to the cluster"""
-        ### Need to modify the copied file
-        # cp config/server.properties config/server-1.properties
         i = self.num_brokers
         self.log.info('Adding broker for total of {}'.format(i))
         server_properties = path.join(self.kafka_home, 'config/server.properties')
@@ -169,7 +174,8 @@ class KafkaManager(object):
         copyfile(server_properties, new_server_properties)
         cmds = ['sed -r -i "s/(broker.id)=(.*)/\1={}/g"'.format(i),
                 'sed -r -i "s/#(listeners=PLAINTEXT:\/\/:)(.*)/\1={}/g"'.format(str(9092+i)),
-                'sed -r -i "s/(log.dirs)=(.*)/\1=\/tmp\/kafka-logs-{}/g"'.format(i)]
+                'sed -r -i "s/(log.dirs)=(.*)/\1=\/tmp\/kafka-logs-{}/g"'.format(i),
+                'sed -r -i "s/#(delete.topic.enable)=(.*)/\1=$DELETE_TOPIC_ENABLE/g"']
         for cmd in cmds:
             cmd = ' '.join([cmd, new_server_properties])
             self.log.debug('Running cmd {} ...'.format(cmd))
@@ -190,5 +196,8 @@ if __name__ == "__main__":
     # Initialize
     kafka_manager = KafkaManager()
     # Start polling to handle requests
-    kafka_manager.poll() 
+    try:
+        kafka_manager.poll()
+    except:
+        kafka_manager.log.exception('Error ... Quitting')
     print('KafkaManager poll exit')

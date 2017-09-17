@@ -9,10 +9,11 @@ ENV KAFKA_HOME /opt/kafka_"$SCALA_VERSION"-"$KAFKA_VERSION"
 ENV AUTO_CREATE_TOPICS true
 ENV KAFKA_MANAGER_CONFIG_DIR /etc/docker-kafka/config
 ENV KAFKA_MANAGER_HOME /opt/kafka_manager
+ENV DELETE_TOPIC_ENABLE true
 
 # Install Kafka, Zookeeper and other needed things
 RUN apt-get update && \
-    apt-get install -y zookeeper wget supervisor dnsutils && \
+    apt-get install -y zookeeper wget supervisor dnsutils less && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean && \
     wget -q http://apache.mirrors.spacedump.net/kafka/"$KAFKA_VERSION"/kafka_"$SCALA_VERSION"-"$KAFKA_VERSION".tgz -O /tmp/kafka_"$SCALA_VERSION"-"$KAFKA_VERSION".tgz && \
@@ -51,4 +52,4 @@ ADD scripts/simple-start-kafka.sh /usr/bin/start-kafka.sh
 RUN chmod +x /usr/bin/start-kafka.sh
 
 # Supervisord will run our services
-CMD ["supervisord", "-n"]
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
