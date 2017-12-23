@@ -22,13 +22,10 @@ class KafkaManager(object):
     subscribers to these two topics receive all published messages and are
     able to relate requests between the two topics through transaction IDs.
     """
-    def __init__(self):
-        # Parse environment variables as DEFAULT configurations
-        self.config = ConfigParser(environ)
-        conf = path.join(environ.get('KAFKA_MANAGER_CONFIG_DIR'), 'config.cfg')
-        self.config.read(conf)
-        self.log = self.start_logger(self.config.get('log', 'path_to_log'))
-        self.kafka_home = environ.get('KAFKA_HOME')
+    def __init__(self, config, log):
+        self.config = config
+        self.log = log
+        self.kafka_home = environ.get(self.config.get('kafka', 'home'))
         self.scripts = dict(self.config.items('kafka-cli'))
         self.zkpr = self.config.get('zookeeper', 'gateway')
         self.consumer_grp = bytes(self.config.get('kafka', 'default_consumer_group'))
@@ -42,9 +39,12 @@ class KafkaManager(object):
                           'is_topic': self.is_topic,
                           'make_topic': self.make_topic,
                           'delete_topic': self.delete_topic}
-        # Initialize <kafka-manager> topics
+        self.log.info("Creating <kafka-manager> topics")
         self.make_topic(topic='kafka-manager-in')
         self.make_topic(topic='kafka-manager-out')
+        if self.config.getboolean('kafka', 'create_debug_topic'):
+            self.log.debug("Creating topic <debug>")
+            self.make_topic(topic='debug')
 
     def health_check(self):
         """Idea, every 30 min run thru tests to ensure cluster is healthy"""
@@ -89,26 +89,6 @@ class KafkaManager(object):
                             self.log.info("Function {} not found".format(function))
                     else:
                         self.log.info("Found None msg")
-
-    def start_logger(self, logs):
-        """Logging boilerplate"""
-        # Create logging directory if it does not exist:
-        if not path.exists(path.dirname(logs)):
-            makedirs(path.dirname(logs))
-        # Logging boilerplate
-        logger = logging.getLogger('KafkaManager')
-        logger.setLevel(logging.DEBUG)
-        fh = logging.FileHandler(logs, mode='a+')
-        fh.setLevel(logging.DEBUG)
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s '\
-                                                                '- %(message)s')
-        fh.setFormatter(formatter)
-        ch.setFormatter(formatter)
-        logger.addHandler(fh)
-        logger.addHandler(ch)
-        return logger
 
     def _get_sh(self, name):
         """Returns shell script by string matching name."""
@@ -191,13 +171,43 @@ class KafkaManager(object):
         raise NotImplementedError
 
 
+def start_logger(logs):
+    """Logging boilerplate"""
+    # Create logging directory if it does not exist:
+    if not path.exists(path.dirname(logs)):
+        makedirs(path.dirname(logs))
+    # Logging boilerplate
+    logger = logging.getLogger('KafkaManager')
+    logger.setLevel(logging.DEBUG)
+    fh = logging.FileHandler(logs, mode='a+')
+    fh.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s '\
+                                                            '- %(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    return logger
+
+
 if __name__ == "__main__":
-    print('Initializing KafkaManager')
+    config = ConfigParser(environ)
+    conf = path.join(environ.get('KAFKA_MANAGER_CONFIG_DIR'), 'config.cfg')
+    config.read(conf)
+    log = start_logger(config.get('log', 'path_to_log'))
+    log.info('Initializing KafkaManager')
     # Initialize
-    kafka_manager = KafkaManager()
+    try:
+        kafka_manager = KafkaManager(config, log)
+    except:
+        log.exception("Exception in KafkaManager() Initialization")
+        raise
     # Start polling to handle requests
     try:
         kafka_manager.poll()
     except:
-        kafka_manager.log.exception('Error ... Quitting')
-    print('KafkaManager poll exit')
+        log.exception('Exception during poll()')
+        raise
+    log.info('KafkaManager exit.')
